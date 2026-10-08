@@ -32,7 +32,7 @@ https://raw.githubusercontent.com/Tashi-sysins/Tashi-sysins-repo/main/repo.json
 
 | プラグイン | どのくらい要るか | 使う場面 |
 |---|---|---|
-| vnavmesh | **必須** | 狩り場の中の移動・敵へ近づく経路（設定の「Auto load mesh」を ON にする） |
+| vnavmesh | **必須** | 狩り場の中の移動・敵へ近づく経路（設定の「Automatically load/build navigation data when changing zones」は ON のまま使う。OFF だと収集を始めない） |
 | Rotation Solver Reborn | **必須** | 戦闘（技を自動で撃つ） |
 | Lifestream | 推奨 | 狩り場のエリアへのテレポ（無ければ手で移動する） |
 | BossMod Reborn | 推奨 | 範囲攻撃の回避・相手へ寄る（無くても集められる。本家の BossMod と一緒に読み込んでいると使わない） |
