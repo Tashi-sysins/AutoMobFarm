@@ -1,0 +1,11 @@
+{
+  "Author": "ヌル, Estell",
+  "Name": "AutoMobFarm",
+  "Punchline": "通常フィールドの素材狩り（カタログの狩り場・反撃あり）",
+  "Description": "素材と目標の所持数を選ぶと、カタログの狩り場へ行き、素材を落とす通常の敵だけを倒して集めます。攻撃してきた敵には反撃します。判別できない敵・FATE・クエスト・リーヴの敵にはこちらから仕掛けません。\n\nvnavmesh と RotationSolverReborn が必要です（エリア移動には Lifestream）。戦っている間の範囲攻撃の回避・敵へ寄る動きは BossMod Reborn に任せます（無くても集められます）。",
+  "Tags": [
+    "combat",
+    "farming",
+    "automation"
+  ]
+}

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+
+  <!--
+    TargetFramework / LangVersion / Platforms / Nullable / AllowUnsafeBlocks / DalamudLibPath / DalamudPackager は
+    Dalamud.NET.Sdk の既定値を使う。Dalamud 15.0.3.6 で確かめた。
+  -->
+  <PropertyGroup>
+    <Version>0.7.1.3</Version>
+    <RootNamespace>AutoMobFarm</RootNamespace>
+    <AssemblyName>AutoMobFarm</AssemblyName>
+    <Description>カタログの狩り場で、素材を落とす通常フィールドの敵を倒して集める</Description>
+    <Authors>ヌル, Estell</Authors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- manifest 本体。DalamudPackager が InternalName / AssemblyVersion / DalamudApiLevel を補完する -->
+    <Content Include="AutoMobFarm.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      モブ用カタログ（出典は THIRD_PARTY_NOTICES.md）。
+      起動のたびにゲームデータ（sqpack）を解析しないため、埋め込みリソースとして持ち、設定フォルダーへ書き出さない
+      （書き出すと、直した版を入れても古い写しが優先される罠がある）。
+    -->
+    <EmbeddedResource Include="Data\mob_catalog_pack.json" LogicalName="AutoMobFarm.mob_catalog_pack.json" />
+  </ItemGroup>
+
+  <!--
+    画面の部品：UI ライブラリ EstellUtils（サブモジュール EstellUtils。README の「ビルド」）。
+    EstellUtils.dll は出力フォルダーへ写り、配置でも一緒に写す（Dalamud が用意する物ではない）。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\EstellUtils\src\EstellUtils\EstellUtils.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 配布の zip にライセンスと第三者の通知を入れる（DalamudPackager は出力フォルダーの中身をまとめる） -->
+    <None Include="..\LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\licenses\GPL-3.0.txt" Link="licenses\GPL-3.0.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- ビルド時刻をアセンブリへ埋め込む（古い DLL が動いていないかの切り分け用） -->
+  <ItemGroup>
+    <AssemblyMetadata Include="BuildTime" Value="$([System.DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))" />
+  </ItemGroup>
+
+  <!--
+    配置：既定では何もしない（Release でビルドしても勝手にコピーしない）。
+    配置するときだけ、配置先を明示して Release でビルドする：
+      dotnet build AutoMobFarm -c Release -p:DeployDir=D:\MyPlugins\AutoMobFarm\
+    DLL を最後に写す（Dalamud は DLL の書き換えで読み込み直すので、先に写すと書きかけの manifest を読んで外れる）。
+  -->
+  <Target Name="DeployToPluginFolder"
+          AfterTargets="DefaultDalamudPackagerRelease"
+          Condition="'$(Configuration)' == 'Release' And '$(DeployDir)' != ''">
+    <ItemGroup>
+      <DeployOthers Include="$(OutputPath)*.json" />
+      <DeployOthers Include="$(OutputPath)EstellUtils.dll" />
+      <DeployDll Include="$(OutputPath)$(AssemblyName).dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(DeployDir)" />
+    <Copy SourceFiles="@(DeployOthers)" DestinationFolder="$(DeployDir)" ContinueOnError="false" />
+    <Copy SourceFiles="@(DeployDll)" DestinationFolder="$(DeployDir)" ContinueOnError="true">
+      <Output TaskParameter="CopiedFiles" ItemName="ActuallyCopied" />
+    </Copy>
+    <Warning Condition="'@(ActuallyCopied)' == ''"
+             Text="DLL を配置できませんでした。ゲームが DLL を掴んでいる可能性があります。" />
+    <Message Condition="'@(ActuallyCopied)' != ''" Importance="high" Text="配置しました: $(DeployDir)" />
+  </Target>
+
+</Project>

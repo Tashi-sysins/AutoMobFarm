@@ -1,0 +1,3 @@
+[submodule "EstellUtils"]
+	path = EstellUtils
+	url = https://github.com/rioriopu/EstellUtils.git
