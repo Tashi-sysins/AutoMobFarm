@@ -74,6 +74,15 @@ public sealed class Engagement
     /// <summary>いま狙っている敵（ID）。</summary>
     public ulong TargetId { get; private set; }
 
+    /// <summary>
+    /// 攻撃してきた敵への反撃か（攻撃してきた敵は、倒してから乗る・移動する）。
+    /// true なら、歩いて届かず乗れない（戦闘中）ときも Stalled にせず、歩ける所まで寄って相手が攻撃の届く所へ来るのを待つ（こちらを狙う敵は寄ってくる）。
+    /// </summary>
+    public bool HoldForAttacker { get; set; }
+
+    // 「歩いて届かないので待つ」を記録に書いたか（相手ごとに 1 回）
+    private bool holdLogged;
+
     /// <summary>自分が頼んだ近づく移動が動いているかもしれない。</summary>
     public bool ApproachIssued => this.path.Active;
 
@@ -103,9 +112,12 @@ public sealed class Engagement
     /// </summary>
     public bool AttackPhase { get; private set; }
 
-    /// <summary>狙い始める（狙い直す）。</summary>
-    public void Start(ICombatWorld world, IFoe foe)
+    /// <summary>狙い始める（狙い直す）。<paramref name="holdForAttacker"/>：攻撃してきた敵への反撃（<see cref="HoldForAttacker"/>）。</summary>
+    public void Start(ICombatWorld world, IFoe foe, bool holdForAttacker = false)
     {
+        this.HoldForAttacker = holdForAttacker;
+        if (this.TargetId != foe.Id)
+            this.holdLogged = false;
         this.TargetId = foe.Id;
         this.stall.Start(foe.Hp, world.Now);
         this.landSince = DateTime.MinValue;
@@ -556,6 +568,7 @@ public sealed class Engagement
         }
 
         var cutOff = !flyPath && this.path.Active && this.path.LastGap > 3f;
+        var holding = false;
 
         if (!cutOff && !world.Mounted && !flyPath && !this.jumpTried && now - this.approachClosestAt > ApproachStuckAfter)
         {
@@ -584,7 +597,20 @@ public sealed class Engagement
                 return Result.Running;
             }
 
-            if (!flyPath)
+            if (!flyPath && this.HoldForAttacker)
+            {
+                // 攻撃してきた敵は倒すまで離れない。歩いて届かず、戦闘中で乗れないときは諦めずに、途切れた経路の手前（歩ける所）まで寄り、
+                // 相手が攻撃の届く所へ来るのを待つ（経路は止めない。たどり終えたら下で頼み直す。届けば上の「攻撃が届く位置」で止まって戦う）
+                holding = true;
+                if (!this.holdLogged)
+                {
+                    this.holdLogged = true;
+                    Core.DebugLog.Current?.Line("戦闘", $"{t.Name}（{dist:0.0}m）へは"
+                        + (cutOff ? $"歩いて届きません（vnavmesh の経路が {this.path.LastGap:0}m 手前で途切れています）" : $"{ApproachStuckAfter.TotalSeconds:0}秒近づけません")
+                        + "。戦闘中で乗れないので、歩ける所まで寄って、相手が攻撃の届く所へ来るのを待ちます（倒すまで離れません）");
+                }
+            }
+            else if (!flyPath)
             {
                 this.StopApproach(nav);
                 this.StallReason = cutOff
@@ -619,7 +645,9 @@ public sealed class Engagement
             }
         }
 
-        status = this.landBlockedAt != null
+        status = holding
+            ? $"{t.Name} へは歩いて届かず乗れないので、寄れる所まで寄って、相手が来るのを待っています（{dist:0.0}m）"
+            : this.landBlockedAt != null
             ? $"{t.Name} の近くですが、ここでは降りられなかったので、相手のそばまで動いています（水平 {flat:0.0}m）"
             : overVoid
             ? $"{t.Name} の近くですが、足もとに降りられる床が無いので、床の上まで飛んで近づきます（水平 {flat:0.0}m）"

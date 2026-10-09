@@ -63,7 +63,7 @@ public sealed class OwnPath
     /// <summary>途切れた歩きの経路の最後の区間を捨てるか。</summary>
     public bool DropCutOffEnd { get; init; }
 
-    /// <summary>最後に受け取った経路の、最後の2点の隔たり（地上の経路が途中までしか引けなかった目安）。</summary>
+    /// <summary>いま頼んでいる経路の、最後の2点の隔たり（地上の経路が途中までしか引けなかった目安）。受け取るまでは 0。</summary>
     public float LastGap { get; private set; }
 
     /// <summary>経路の最後の区間の長さ（3点以上の経路だけ。2点以下は 0）。</summary>
@@ -76,6 +76,9 @@ public sealed class OwnPath
     public bool Request(INavControl nav, Vector3 start, Vector3 destination, bool flying)
     {
         this.Abandon();
+        // 前の経路の隔たりを持ち越さない。持ち越すと、新しい相手への経路を探している間に、前の相手の「21m 手前で途切れ」を見て
+        // 「歩いて行けない」と判断する（攻撃してきた敵への反撃を始めた 2 フレーム後に、前の値で諦めて殴られたまま次へ進んでしまう）
+        this.LastGap = 0f;
         var source = new CancellationTokenSource();
         if (!nav.TryPathfindCancelable(start, destination, flying, source.Token, out var t) || t == null)
         {

@@ -91,7 +91,7 @@ public sealed class FarmLimits
     /// <summary>1体にかける時間の上限（届かない・倒しきれない個体を諦める）。</summary>
     public TimeSpan TargetLimit { get; init; } = TimeSpan.FromMinutes(3);
 
-    /// <summary>諦めた個体をもう一度狙うまでの時間（反撃の相手も同じ）。</summary>
+    /// <summary>諦めた個体をもう一度狙うまでの時間（こちらから仕掛ける相手だけ。攻撃してきた敵は諦めずに反撃する）。</summary>
     public TimeSpan GiveUpFor { get; init; } = TimeSpan.FromMinutes(2);
 
     public TimeSpan SpawnWait { get; init; } = TimeSpan.FromSeconds(90);
@@ -154,6 +154,8 @@ public enum StandbyKind
 ///  ・こちらから仕掛けるのは、個体の判定（TargetJudge）を通り、この実行の狩り場（<see cref="FarmPlan.Areas"/>）に入る個体だけ（R1・D2）。
 ///  ・攻撃してきた敵（敵視リストにいる生きた敵）は、計画の対象かどうかに関係なく反撃して倒す。乗っていれば降りる（D1）。
 ///    危険でない理由で終わるときも、攻撃してきた敵を倒しきってから終える（FinishWhenClear）。
+///    反撃の相手は諦めない（歩いて届かず乗れなければ、寄れる所まで寄って来るのを待つ。HP が減らない・時間がかかるときも離れない：KeepRetaliating）。
+///    倒すまで、次の狙い・移動・乗る・テレポへ進まない。
 ///  ・RSR は開始の時点で控えを取り、Off（攻撃の抑止）にする。攻撃を許すのは Engage の間だけで、相手にハードターゲットを置いた後に
 ///    Henched を頼み、範囲攻撃 Off などと Henched を読み直してから（R3・R7）。移動・待機・所持数確認・条件待ちでは Off（R2・D4）。
 ///    RSR の設定が外から変わった・反映しない・読めないときは止めずに送り直す（RsrController。D10）。
@@ -185,6 +187,10 @@ public sealed class FarmRunner
     // 終わり方が決まっているが、攻撃してきた敵を倒してから終える（FinishWhenClear）。反撃の後に戻る状態（反撃が続く間だけ値を持つ）
     private (FarmState State, string Code, string Message, IReadOnlyList<string> Details)? pendingFinish;
     private FarmState? resumeState;
+
+    // 「離れずに反撃を続けます」を記録した相手と時刻（同じ相手は 30 秒に 1 回だけ書く）
+    private ulong keepLoggedFor;
+    private DateTime keepLoggedAt = DateTime.MinValue;
 
     // 反撃中か・反撃の相手が敵視リストから消えた時刻
     private bool retaliating;
@@ -1218,17 +1224,17 @@ public sealed class FarmRunner
     }
 
     /// <summary>
-    /// 攻撃してきた敵（敵視リスト UIState.Hater にいる、生きた・敵対する・ターゲットできる敵。諦めた個体を除く）。近い順。
+    /// 攻撃してきた敵（敵視リスト UIState.Hater にいる、生きた・敵対する・ターゲットできる敵）。近い順。
     /// 計画・FATE・イベント・他人の獲物の判定は見ない（攻撃してきた以上、倒す：D1）。
+    /// 「諦めた個体」も除かない（除くと、歩いて届かず乗れない〔戦闘中〕と諦めた敵に殴られたまま、次の狙い・移動へ進む）。
     /// </summary>
     private List<MobSnapshot> Attackers(DateTime now)
     {
-        this.ExpireGiveUps(now);
         var me = this.world.MyPosition;
         return this.world.Haters
             .Select(id => this.world.FindMob(id))
             .OfType<MobSnapshot>()
-            .Where(m => m.IsCombatant && !m.Dead && m.Hp > 0 && m.Enemy && m.Targetable && !this.giveUpAt.ContainsKey(m.GameObjectId))
+            .Where(m => m.IsCombatant && !m.Dead && m.Hp > 0 && m.Enemy && m.Targetable)
             .OrderBy(m => Vector3.Distance(m.Position, me))
             .ToList();
     }
@@ -1267,7 +1273,7 @@ public sealed class FarmRunner
         this.targetSince = now;
         this.retaliating = true;
         this.retaliationLostSince = null;
-        this.engage.Start(this.world, new SnapshotFoe(attacker));
+        this.engage.Start(this.world, new SnapshotFoe(attacker), holdForAttacker: true);
         this.Enter(FarmState.Engage, this.pendingFinish is { } pf
             ? $"{pf.Message}。攻撃してきた敵を倒してから終えます（{attacker.Name}）"
             : $"攻撃してきた {attacker.Name} に反撃します");
@@ -1341,6 +1347,7 @@ public sealed class FarmRunner
         {
             this.retaliating = true;   // いま戦っている相手が攻撃してきている。そのまま倒す（以後は反撃として扱い、判定し直さない）
             this.retaliationLostSince = null;
+            this.engage.HoldForAttacker = true;
             return;
         }
 
@@ -1416,6 +1423,12 @@ public sealed class FarmRunner
 
         if (now - this.targetSince > this.limits.TargetLimit)
         {
+            if (this.retaliating)
+            {
+                this.KeepRetaliating(mob, now, $" に {this.limits.TargetLimit.TotalMinutes:0}分かけても倒せていませんが、");
+                return;
+            }
+
             Core.DebugLog.Current?.Line("収集", $"{mob.Name} に {this.limits.TargetLimit.TotalMinutes:0}分かけても倒せません。この個体は諦めます");
             this.EndFight(now, giveUp: true);
             return;
@@ -1442,9 +1455,15 @@ public sealed class FarmRunner
             case Engagement.Result.Running:
                 this.Status = this.retaliating ? $"反撃：{status}" : status;
                 break;
+            case Engagement.Result.Stalled when this.retaliating:
+                this.KeepRetaliating(mob, now, this.engage.StallReason ?? $"の HP が {StallWatch.Limit.TotalSeconds:0}秒減りませんが、");
+                break;
             case Engagement.Result.Stalled:
                 Core.DebugLog.Current?.Line("収集", $"{mob.Name}{this.engage.StallReason ?? $"の HP が {StallWatch.Limit.TotalSeconds:0}秒減りません。"}この個体は諦めます");
                 this.EndFight(now, giveUp: true);
+                break;
+            case Engagement.Result.NavFailed when this.retaliating:
+                this.KeepRetaliating(mob, now, $" へ近づけません（{this.engage.Problem}）が、");
                 break;
             case Engagement.Result.NavFailed:
                 // 経路探索を使えない（vnavmesh が無い・古い）。止めずにこの相手を諦める（D10）
@@ -1452,6 +1471,24 @@ public sealed class FarmRunner
                 this.EndFight(now, giveUp: true);
                 break;
         }
+    }
+
+    /// <summary>
+    /// 反撃の相手は諦めない（攻撃してきた敵は、倒してから乗る・移動する）。
+    /// HP が減らない・時間がかかる・近づけないときも離れず、近づき方を最初からやり直す（降りる場所の候補・ジャンプ・HP の見張り・時間を数え直す）。
+    /// 反撃をやめるのは、倒したときと、相手がこちらを狙うのをやめた（敵視リストから消えたまま RetaliationLostGrace）ときだけ。記録は相手ごとに 30 秒に 1 回。
+    /// </summary>
+    private void KeepRetaliating(MobSnapshot mob, DateTime now, string why)
+    {
+        if (this.keepLoggedFor != mob.GameObjectId || now - this.keepLoggedAt >= TimeSpan.FromSeconds(30))
+        {
+            this.keepLoggedFor = mob.GameObjectId;
+            this.keepLoggedAt = now;
+            Core.DebugLog.Current?.Line("反撃", $"{mob.Name}{why}まだ攻撃してくるので、離れずに反撃を続けます（近づき方をやり直します）");
+        }
+
+        this.targetSince = now;
+        this.engage.Start(this.world, new SnapshotFoe(mob), holdForAttacker: true);
     }
 
     /// <summary>倒した直後。所持数の変化を CountWait だけ待ってから行き先を決める（落とさないこともあるので、待つのはこの時間だけ）。</summary>
