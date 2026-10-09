@@ -57,6 +57,7 @@ public sealed class FarmWindow : EuWindow
     private List<(uint Id, string Name)>? comboItems; // 品の選択の一覧（カタログの品＝普段から湧く敵が落とす品）
     private string? renameId;        // 名前を変えるプリセット（右クリックの「プリセット名を変更」）
     private string renameText = string.Empty;
+    private string? dragPresetId;    // つまんで動かしているプリセット（左の一覧の並べ替え。離すまで）
 
     // 必須プラグイン（導入済みの一覧と配布元は1秒に1回だけ読む。毎フレーム Dalamud の一覧を作らせない）
     private const string RequiredTab = "必須プラグイン";
@@ -500,7 +501,7 @@ public sealed class FarmWindow : EuWindow
                 var res = EUi.Selectable($"{band.Name}（{items.Count} 品）##band{i}", this.bandIndex == i).Tip("右クリックで、この帯の品をまとめて自動討伐に追加");
                 if (res.Clicked)
                     this.bandIndex = i;
-                if (EUi.ContextMenu($"bandctx{i}", res, $"自動討伐に追加する（{band.PresetName}・{items.Count} 品）") == 0)
+                if (EUi.ContextMenu($"bandctx{i}", res, $"自動討伐に追加する（{band.Name}・{items.Count} 品）") == 0)
                     this.AddBand(band, items);
             }
 
@@ -601,7 +602,7 @@ public sealed class FarmWindow : EuWindow
             return;
         }
 
-        var preset = this.p.Presets.AddBand(band.PresetName,
+        var preset = this.p.Presets.AddBand(band.Name, // アイテムタブの帯と同じ名前
             items.Select(it => (it.ItemId, (IEnumerable<SourceMobRef>)it.Entries
                 .Select(e => new SourceMobRef { NameId = e.NameId, Territory = e.Point.Territory })
                 .GroupBy(s => (s.NameId, s.Territory)).Select(g => g.First()).ToList())),
@@ -627,11 +628,19 @@ public sealed class FarmWindow : EuWindow
             using (EUi.Scroll("##presetList", SizeSpec.Fill, reserveBelow: buttons))
             {
                 var running = this.p.Goals.Active;
+                var rows = new List<(string Id, Rect Rect)>();
                 foreach (var pr in book.Presets.ToList())
                 {
                     var res = EUi.Selectable($"{(string.IsNullOrEmpty(pr.Name) ? "（名前なし）" : pr.Name)}##pr{pr.Id}", pr.Id == book.SelectedId)
-                        .Tip("右クリックで「プリセット名を変更」「削除」");
-                    if (res.Clicked)
+                        .TipIf(this.dragPresetId == null, "つまんで上下へ動かすと並べ替え（「開始」はこの並びの上から集めます）・右クリックで「プリセット名を変更」「削除」");
+                    rows.Add((pr.Id, res.Rect));
+
+                    // 押したまま少し動かしたら「つまんだ」とみなす（手ぶれのクリックは選ぶだけ）
+                    if (res.Held && this.dragPresetId == null && EUi.Input.IsDragging(MouseButton.Left))
+                        this.dragPresetId = pr.Id;
+
+                    // つまんで動かした後に自分の上で離したときは、選ばない（並べ替えの操作だったため）
+                    if (res.Clicked && this.dragPresetId == null)
                     {
                         book.Select(pr.Id);
                         this.SavePresets();
@@ -655,6 +664,8 @@ public sealed class FarmWindow : EuWindow
                             break;
                     }
                 }
+
+                this.DragPreset(book, rows);
             }
 
             using (EUi.HStack())
@@ -685,6 +696,47 @@ public sealed class FarmWindow : EuWindow
 
         using (EUi.Region(right, EdgeInsets.Zero))
             this.DrawGoals(c, book.Selected);
+    }
+
+    /// <summary>
+    /// プリセットの並べ替え：つまんで上下へ動かすと、差し込む位置（行と行のあいだ）に細い横線を出し、離すとそこへ移す。
+    /// 動かしている行は枠で示す。一覧の横幅から外れた所で離したら何もしない。自分の上・自分の下（並びが変わらない所）には線を出さない。
+    /// 描画は EstellUtils の Painter だけ（生の ImGui は使わない）。位置の計算は ListReorder・並べ替えは PresetBook.Move（どちらも試験あり）。
+    /// </summary>
+    private void DragPreset(PresetBook book, List<(string Id, Rect Rect)> rows)
+    {
+        if (this.dragPresetId is not { } id)
+            return;
+        var from = rows.FindIndex(r => r.Id == id);
+        if (from < 0)
+        {
+            this.dragPresetId = null; // 動かしている間に消えた
+            return;
+        }
+
+        var input = EUi.Input;
+        var spans = rows.Select(r => (r.Rect.Min.Y, r.Rect.Max.Y)).ToList();
+        var left = rows.Min(r => r.Rect.Min.X);
+        var right = rows.Max(r => r.Rect.Max.X);
+        var at = ListReorder.InsertIndex(spans, input.MousePos.Y);
+        var moves = input.HasMousePos && input.MousePos.X >= left && input.MousePos.X <= right
+                    && PresetBook.MoveChangesOrder(from, at, rows.Count);
+
+        if (!input.IsDown(MouseButton.Left))
+        {
+            // 離した（窓の外で離したのを後のフレームで知ったときも、ここで終える）
+            this.dragPresetId = null;
+            if (moves && book.Move(id, at))
+                this.SavePresets();
+            return;
+        }
+
+        Painter.RectOutline(rows[from].Rect, EUi.Colors.AccentMuted, 1f, EUi.Metrics.WidgetRounding);
+        if (moves)
+        {
+            var y = ListReorder.LineY(spans, at);
+            Painter.Line(new Vector2(left, y), new Vector2(right, y), EUi.Colors.Accent, 2f);
+        }
     }
 
     /// <summary>

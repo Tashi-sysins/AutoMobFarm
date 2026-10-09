@@ -61,6 +61,49 @@ public sealed class MobCatalog
 
     public CatalogPoint? Point(string key) => this.pointByKey!.GetValueOrDefault(key);
 
+    /// <summary><see cref="WithoutItems"/> で外した品（パックにあった物だけ。番号の順）。</summary>
+    [JsonIgnore]
+    public IReadOnlyList<uint> RemovedItems { get; private init; } = [];
+
+    /// <summary><see cref="WithoutItems"/> で、外した品しか落とさないので一緒に外した敵（名前 ID の順）。</summary>
+    [JsonIgnore]
+    public IReadOnlyList<uint> RemovedMobs { get; private init; } = [];
+
+    /// <summary>
+    /// 品を外した写し（採集で採れる品。GatherableItems）。
+    /// 敵の落とす品からも外し、外した品しか落とさない敵とその地点も外す（一覧は素材を落とす敵だけ。
+    /// シャード等しか落とさない敵を外したのと同じ扱い）。地域の一覧はそのまま。元のカタログは変えない。
+    /// 画面（モブ・アイテム・自動討伐の品の選択）・Artisan の取り込み・収集の計画は、すべてこの写しを使う。
+    /// </summary>
+    public MobCatalog WithoutItems(IReadOnlySet<uint> items)
+    {
+        var mobs = new List<CatalogMob>();
+        var removedMobs = new List<uint>();
+        foreach (var m in this.Mobs)
+        {
+            var left = m.Items.Where(i => !items.Contains(i)).ToList();
+            if (left.Count > 0)
+                mobs.Add(left.Count == m.Items.Count ? m : m with { Items = left });
+            else
+                removedMobs.Add(m.NameId);
+        }
+
+        var names = mobs.Select(m => m.NameId).ToHashSet();
+        var c = new MobCatalog
+        {
+            Format = this.Format,
+            Meta = this.Meta,
+            Territories = this.Territories,
+            Items = this.Items.Where(i => !items.Contains(i.Id)).ToList(),
+            Mobs = mobs,
+            Points = this.Points.Where(p => names.Contains(p.NameId)).ToList(),
+            RemovedItems = this.Items.Select(i => i.Id).Where(items.Contains).OrderBy(i => i).ToList(),
+            RemovedMobs = removedMobs.OrderBy(n => n).ToList(),
+        };
+        c.Index();
+        return c;
+    }
+
     public static MobCatalog LoadEmbedded()
     {
         var asm = Assembly.GetExecutingAssembly();
@@ -81,15 +124,21 @@ public sealed class MobCatalog
                 throw new InvalidOperationException($"地点 {p.Key} のレベルが 1〜100 の外です");
         }
 
-        c.mobByName = c.Mobs.ToDictionary(m => m.NameId);
-        c.pointsByName = c.Points.GroupBy(p => p.NameId).ToDictionary(g => g.Key, g => g.ToList());
-        c.mobsByItem = c.Mobs.SelectMany(m => m.Items.Select(i => (Item: i, m.NameId))).GroupBy(x => x.Item)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.NameId).Distinct().OrderBy(n => n).ToList());
-        c.exByTerritory = c.Territories.ToDictionary(t => t.Territory, t => t.ExVersion);
-        c.itemNames = c.Items.Where(i => i.Name != null).ToDictionary(i => i.Id, i => i.Name!);
-        c.itemIcons = c.Items.ToDictionary(i => i.Id, i => i.Icon);
-        c.pointByKey = c.Points.ToDictionary(p => p.Key);
+        c.Index();
         return c;
+    }
+
+    /// <summary>引くための索引を作る（読み込んだとき・品を外した写しを作ったとき）。</summary>
+    private void Index()
+    {
+        this.mobByName = this.Mobs.ToDictionary(m => m.NameId);
+        this.pointsByName = this.Points.GroupBy(p => p.NameId).ToDictionary(g => g.Key, g => g.ToList());
+        this.mobsByItem = this.Mobs.SelectMany(m => m.Items.Select(i => (Item: i, m.NameId))).GroupBy(x => x.Item)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.NameId).Distinct().OrderBy(n => n).ToList());
+        this.exByTerritory = this.Territories.ToDictionary(t => t.Territory, t => t.ExVersion);
+        this.itemNames = this.Items.Where(i => i.Name != null).ToDictionary(i => i.Id, i => i.Name!);
+        this.itemIcons = this.Items.ToDictionary(i => i.Id, i => i.Icon);
+        this.pointByKey = this.Points.ToDictionary(p => p.Key);
     }
 }
 
@@ -150,7 +199,8 @@ public sealed class CatalogItem
     public string? Name { get; init; }
 }
 
-public sealed class CatalogMob
+/// <summary>敵（品を外した写しを <c>with</c> で作るため record。MobCatalog.WithoutItems）。</summary>
+public sealed record CatalogMob
 {
     [JsonPropertyName("icon")]
     public uint Icon { get; init; }

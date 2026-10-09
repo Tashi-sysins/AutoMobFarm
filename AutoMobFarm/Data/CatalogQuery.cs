@@ -7,11 +7,14 @@ namespace AutoMobFarm.Data;
 /// <summary>戦闘レベルの帯（10 ずつ）。</summary>
 public sealed record LevelBand(int Min, int Max)
 {
-    /// <summary>画面の左の一覧の名前（例：Lv91～Lv100）。</summary>
+    /// <summary>
+    /// 画面の左の一覧の名前（例：Lv91～Lv100）。帯から作るプリセットの名前もこれ（アイテムタブの帯と同じ名前にそろえる。
+    /// 0.7.1.3 までの「91Lv～100Lv」の形の名前のプリセットは PresetMigration が直す）。
+    /// </summary>
     public string Name => $"Lv{this.Min}～Lv{this.Max}";
 
-    /// <summary>帯から作るプリセットの名前（例 91Lv～100Lv）。</summary>
-    public string PresetName => $"{this.Min}Lv～{this.Max}Lv";
+    /// <summary>0.7.1.3 までの帯のプリセットの名前（例：91Lv～100Lv）。前の名前を今の名前へ直すときだけ使う。</summary>
+    public string OldPresetName => $"{this.Min}Lv～{this.Max}Lv";
 
     public bool Contains(int level) => level >= this.Min && level <= this.Max;
 }

@@ -138,10 +138,31 @@ public sealed class Plugin : IDalamudPlugin
             DebugLog.Current.Line("起動", catalogError);
         }
 
+        // 採集で採れる品は敵を倒して集めない。
+        // 判定はいまのゲームの表で行い（GatherableItems）、一覧・品の選択・Artisan の取り込み・収集の計画が使うカタログの写しから外す。
+        // 表を読めないとき（型の欄の名前が変わったなど）は外さずに続け、理由を記録に残す
+        var gatherable = new HashSet<uint>();
+        try
+        {
+            gatherable = GatherableItems.FromGame();
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Current.Line("起動", $"採集で採れる品を調べられなかったので、外さずに続けます（{ex.GetType().Name}: {ex.Message}）");
+        }
+
+        if (catalog != null && gatherable.Count > 0)
+        {
+            catalog = catalog.WithoutItems(gatherable);
+            DebugLog.Current.Line("起動", $"採集で採れる品 {catalog.RemovedItems.Count} 品（{string.Join("・", catalog.RemovedItems.Select(GameText.Item))}）と、"
+                                         + $"それしか落とさない敵 {catalog.RemovedMobs.Count} 種を一覧から外しました（ゲームの採集で採れる品 {gatherable.Count} 品から判定）");
+        }
+
         this.seenTerritories = catalog?.Territories.Select(t => t.Territory).ToHashSet() ?? [];
         MigratePresets(config, catalog);
         foreach (var note in PresetBook.Sanitize(config.Presets))
             DebugLog.Current.Line("起動", $"プリセットの読み込み：{note}");
+        RemoveGatherableGoals(config, gatherable);
         var presets = new PresetBook(config.Presets, config.SelectedPresetId, config.SinglePresetId);
         var goals = new GoalRunner(runner, world, (n, t) => catalog?.PointsOf(n).Where(x => x.Territory == t).ToList() ?? [], found, item => catalog?.MobsDropping(item) is { Count: > 0 } l ? l.ToHashSet() : null, GameText.Item);
         var bossMod = new BossModIpc();
@@ -213,17 +234,32 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// 旧版（単品の設定）からプリセットへの移行（1回だけ。版つき）。単品の設定は消さずに残し、移行の前に設定ファイルの写しを作る。
-    /// 選んでいた素材があれば、その品名のプリセットを1つ作る（目標数は旧設定の値・落とすモブの候補は選んでいたエリアのカタログの地点から）。
+    /// プリセットの設定の移行（版ごとに1回だけ。PresetMigration）。移行の前に設定ファイルの写しを作る。
+    /// 版 1：旧版（単品の設定）からプリセットへ。単品の設定は消さずに残し、選んでいた素材があれば、その品名のプリセットを1つ作る。
+    /// 版 2：帯のプリセットの名前を、アイテムタブの帯と同じ形へ（「61Lv～70Lv」→「Lv61～Lv70」）。
     /// </summary>
     private static void MigratePresets(Configuration config, MobCatalog? catalog)
     {
         if (config.PresetsVersion >= PresetMigration.CurrentVersion)
             return;
-        var backup = BackupConfig("before-presets-v1", "プリセットの形へ移行します");
+        var backup = BackupConfig($"before-presets-v{PresetMigration.CurrentVersion}", $"プリセットの設定を版 {config.PresetsVersion} から {PresetMigration.CurrentVersion} へ移行します");
         var note = PresetMigration.Migrate(config, catalog, GameText.Item);
         config.Save();
         DebugLog.Current?.Line("起動", $"{backup}。{note}");
+    }
+
+    /// <summary>
+    /// 採集で採れる品をプリセットから外す（起動のたび）。外す品があるときだけ、先に設定ファイルの写しを作る。
+    /// 品が無くなったプリセットも残す（名前と並びは利用者の物）。
+    /// </summary>
+    private static void RemoveGatherableGoals(Configuration config, IReadOnlySet<uint> gatherable)
+    {
+        if (gatherable.Count == 0 || !config.Presets.Any(p => p.Goals.Any(g => gatherable.Contains(g.ItemId))))
+            return;
+        var backup = BackupConfig("before-gatherable-removal", "採集で採れる品をプリセットから外します");
+        var removed = PresetBook.RemoveItems(config.Presets, gatherable);
+        config.Save();
+        DebugLog.Current?.Line("起動", $"{backup}。" + string.Join("・", removed.Select(r => $"「{r.Preset.Name}」から {string.Join("・", r.Items.Select(GameText.Item))}")));
     }
 
     private void OnUpdate(Dalamud.Plugin.Services.IFramework framework)

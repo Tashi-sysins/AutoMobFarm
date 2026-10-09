@@ -135,6 +135,46 @@ public sealed class PresetBook
             this.SingleId = null; // 次の単品の追加で作り直す
     }
 
+    /// <summary>
+    /// 並べ替える（左の一覧でつまんで動かし、細い横線の所で離したとき）。
+    /// <paramref name="insertAt"/> は動かす前の並びでの差し込み位置（0＝先頭の上・件数＝末尾の下）。並びが変わらなければ false。
+    /// 「開始」は全部のプリセットをこの並びの上から順に集める（実行中に並べ替えても、いまの実行は開始時の順のまま）。
+    /// </summary>
+    public bool Move(string id, int insertAt)
+    {
+        var from = this.presets.FindIndex(p => p.Id == id);
+        if (from < 0 || !MoveChangesOrder(from, insertAt, this.presets.Count))
+            return false;
+        var p = this.presets[from];
+        this.presets.RemoveAt(from);
+        this.presets.Insert(insertAt > from ? insertAt - 1 : insertAt, p);
+        return true;
+    }
+
+    /// <summary>from 番目を insertAt の位置へ差し込むと並びが変わるか（自分の上・自分の下へは変わらない）。画面の横線もこれで出し分ける。</summary>
+    public static bool MoveChangesOrder(int from, int insertAt, int count)
+        => from >= 0 && from < count && insertAt >= 0 && insertAt <= count && insertAt != from && insertAt != from + 1;
+
+    /// <summary>
+    /// 品を外す（採集で採れる品。起動のたびに呼ぶ）。
+    /// 外した品をプリセットごとに返す（無ければ空）。品が無くなったプリセットも残す（名前と並びは利用者の物）。
+    /// </summary>
+    public static List<(Preset Preset, List<uint> Items)> RemoveItems(List<Preset> presets, IReadOnlySet<uint> items)
+    {
+        var removed = new List<(Preset, List<uint>)>();
+        foreach (var p in presets)
+        {
+            var gone = p.Goals.Where(g => items.Contains(g.ItemId)).Select(g => g.ItemId).ToList();
+            if (gone.Count == 0)
+                continue;
+            p.Goals.RemoveAll(g => items.Contains(g.ItemId));
+            p.Revision++;
+            removed.Add((p, gone));
+        }
+
+        return removed;
+    }
+
     /// <summary>名前を変える。空なら変えない。前後の空白は落とす。</summary>
     public void Rename(string id, string name)
     {
@@ -166,7 +206,7 @@ public sealed class PresetBook
         return new PresetAddResult(target, created, goal, createdGoal);
     }
 
-    /// <summary>帯の品をまとめて足す（帯の名前で新しく作り、それを選ぶ）。</summary>
+    /// <summary>帯の品をまとめて足す（帯の名前で新しく作り、それを選ぶ。名前はアイテムタブの帯と同じ「Lv61～Lv70」）。</summary>
     public Preset AddBand(string bandName, IEnumerable<(uint ItemId, IEnumerable<SourceMobRef> Sources)> items, int defaultTarget)
     {
         var p = new Preset { Name = this.UniqueName(bandName) };
