@@ -9,7 +9,7 @@ namespace AutoMobFarm.Ipc;
 /// vnavmesh への窓口。IPC 名と型は vnavmesh のソース（ffxiv_navmesh/vnavmesh/IPCProvider.cs）で確認済み。
 ///
 /// 注意（資料と実装から確かめた事実）:
-///  ・経路探索に失敗しても例外は飛ばず、経路が空のまま終わる。「移動失敗」と「移動完了」が IPC 上は区別できない → 距離と制限時間を自分で確かめる。
+///  ・経路探索は空経路のほか、Task の例外・キャンセルで終わる場合もある（OwnPath が処理する）。到着は距離と制限時間で確かめる。
 ///  ・Path.Stop は全体に効く（他のプラグインが始めた移動も止まる）。自分が始めた移動のときだけ呼ぶ（<see cref="Farm.OwnPath"/> が終点で見分ける）。
 ///  ・Nav.PathfindCancelAll の中身はメッシュの再読み込みなので使わない。
 ///  ・SimpleMove は探索が終わると vnavmesh が自分で歩き出し、止めた後に遅れて歩き出すので使わない（取り消せる探索だけを使う）。
@@ -33,7 +33,7 @@ public sealed class VnavmeshIpc : IpcGate, Farm.INavControl
     public float? BuildProgress()
         => this.TryInvoke("Nav.BuildProgress", () => this.Func<float>("vnavmesh.Nav.BuildProgress").InvokeFunc(), out var p) ? p : null;
 
-    /// <summary>いまのエリアのナビメッシュを読み込ませる（自動読み込みが OFF の環境向け。設定は変えない）。</summary>
+    /// <summary>現在の読み込み対象のナビメッシュを再読み込みする。自動読み込みOFFで対象が無ければロードされない。成功は準備完了を意味しない。</summary>
     public bool Reload()
         => this.TraceThen("Nav.Reload()") && this.TryInvoke("Nav.Reload", () => this.Func<bool>("vnavmesh.Nav.Reload").InvokeFunc(), out _);
 

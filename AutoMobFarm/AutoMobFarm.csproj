@@ -3,10 +3,10 @@
 
   <!--
     TargetFramework / LangVersion / Platforms / Nullable / AllowUnsafeBlocks / DalamudLibPath / DalamudPackager は
-    Dalamud.NET.Sdk の既定値を使う。Dalamud 15.0.3.6 で確かめた。
+    Dalamud.NET.Sdk の既定値を使う。Dalamud 15.0.4.0 / ClientStructs 7.57.0.9480 でビルド・試験。
   -->
   <PropertyGroup>
-    <Version>0.7.1.5</Version>
+    <Version>0.7.1.8</Version>
     <RootNamespace>AutoMobFarm</RootNamespace>
     <AssemblyName>AutoMobFarm</AssemblyName>
     <Description>カタログの狩り場で、素材を落とす通常フィールドの敵を倒して集める</Description>
@@ -16,6 +16,7 @@
   <ItemGroup>
     <!-- manifest 本体。DalamudPackager が InternalName / AssemblyVersion / DalamudApiLevel を補完する -->
     <Content Include="AutoMobFarm.json" />
+    <InternalsVisibleTo Include="AutoMobFarm.Tests" />
   </ItemGroup>
 
   <ItemGroup>

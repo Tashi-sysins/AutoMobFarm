@@ -16,7 +16,7 @@ namespace AutoMobFarm.Ipc;
 ///   SwitchToFollow(int)・SwitchToIdle() を呼ぶ。チャットの /bmrai on は使わない
 ///   （追う相手が設定の FollowSlot になり、パーティの誰かを追ってしまうため）。
 /// 【設定】BossMod.Configuration(List&lt;string&gt; args, bool save)：["AIConfig", 項目] で読む（値の ToString が1行）、
-///   ["AIConfig", 項目, 値] で書く（成功なら空の一覧）。save=false なら設定ファイルへ書かない。
+///   ["AIConfig", 項目, 値] で書く（成功なら空の一覧）。save=false はその操作の保存通知を抑えるだけで、他の保存からの除外は保証しない。
 /// 名前と型は BossmodReborn のソース（7.5.6.20：IPCProvider.cs・AIManager.cs・ConfigRoot.cs）で確認し、導入版 7.5.6.33 の DLL にも
 /// 同じ名前があることを確かめた。
 /// </summary>

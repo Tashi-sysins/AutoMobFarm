@@ -122,7 +122,8 @@ public sealed class BmrAssist
 
     /// <summary>
     /// 手放す：自分で入れた AI を切る（追う相手を替えたなら戻す）→ 外れたプリセットを戻す → 設定を入れたのと逆の順で元へ戻す
-    /// （利用者が途中で変えた値は上書きしない）。BMR が読み込まれていなければ、控えを捨てる（BMR のファイルには書いていないので、次に読み込んだとき元の値）。
+    /// （利用者が途中で変えた値は上書きしない）。BMR が読み込まれていなければ控えを捨てる。
+    /// save=falseでも別項目の保存時に一時値が保存され得るため、この場合の復元は保証できない（互換点検資料の既存課題）。
     /// </summary>
     public void Release(string why)
     {
@@ -131,7 +132,7 @@ public sealed class BmrAssist
 
         if (this.bmr.Unusable is { } gone)
         {
-            Core.DebugLog.Current?.Line("BMR", $"手放します（{why}）。BMR を読めないので戻す操作はしません（{gone}。設定はファイルへ書いていないので、BMR の読み込み直しで元の値です）");
+            Core.DebugLog.Current?.Line("BMR", $"手放します（{why}）。BMR を読めないので戻す操作はしません（{gone}。設定の復元は確認できません。BMR を読み込んだ後に設定を確認してください）");
             this.Forget();
             return;
         }

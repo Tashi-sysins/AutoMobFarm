@@ -4,7 +4,7 @@ namespace AutoMobFarm.Ipc;
 /// RotationSolverReborn（RSR）への窓口：命令を送ることと、内部の値を読むことだけ（判断は Farm\RsrController）。
 ///
 /// 【名前の前置詞】IPC の前置詞は "RotationSolverReborn"。プラグインの InternalName は "RotationSolver"。
-/// 【型】導入版 7.5.6.19 の DLL を MetadataLoadContext で読んで確認した：
+/// 【型】導入版 7.5.8.7 / 7.5.8.8 の DLL とソースで確認した。7.5.6.19 とも同じ引数：
 ///   void ChangeOperatingMode(StateCommandType : byte)   Off=0, Auto=1, TargetOnly=2, Manual=3, AutoDuty=4, Henched=5, PvP=6
 ///   void OtherCommand(OtherCommandType : byte, string)  Settings=0（"AoEType Off" / "TargetFreely false" など）
 ///   bool AutorotationActive()
