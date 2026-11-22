@@ -26,8 +26,8 @@ public sealed class Configuration : IPluginConfiguration, Farm.IRsrStore
     /// <summary>収集中に見かけた敵のレベルを記録し、表示へ重ねる。調査のための移動は行わない。</summary>
     public bool SeenMobRecording { get; set; } = true;
 
-    /// <summary>起動時に画面を開くか。</summary>
-    public bool OpenOnStartup { get; set; } = true;
+    /// <summary>旧設定との互換用。0.7.1.7以降は参照せず、画面は手動で開く。</summary>
+    public bool OpenOnStartup { get; set; }
 
     /// <summary>長時間の進展なしで止めるまでの分。</summary>
     public int NoProgressMinutes { get; set; } = 10;

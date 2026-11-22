@@ -211,8 +211,7 @@ public sealed class Plugin : IDalamudPlugin
 
         DebugLog.Current.Line("起動", $"読み込みました（{this.parts.PluginVersion}・カタログ {catalog?.Meta.CatalogSchema ?? "なし"}・見つけた位置 {found.Count} 件・プリセット {config.Presets.Count} 件）");
         DebugLog.Current.Line("起動", $"見かけた敵の記録：{seen.Count} 件");
-        if (config.OpenOnStartup)
-            this.farmWindow.IsOpen = true;
+        // 起動・再読み込みでは画面を開かない。旧設定の OpenOnStartup が true でも、手動で開くまで閉じておく。
     }
 
     /// <summary>設定ファイルの写しを残す（壊れた設定・移行の前）。写しの場所を含む文を返す。</summary>
@@ -325,6 +324,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnLogout(int type, int code)
     {
+        // 同じゲームプロセスで再ログインしても、前のキャラクターで開いた画面を持ち越さない。
+        this.farmWindow.IsOpen = false;
+        this.window.IsOpen = false;
         this.HoldEverything("logout", "ログアウトしました。RSR は Off のまま控えを保持しています");
     }
 

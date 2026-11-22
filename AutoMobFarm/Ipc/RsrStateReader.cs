@@ -1,15 +1,12 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
-using System.Runtime.Loader;
 
 namespace AutoMobFarm.Ipc;
 
 /// <summary>
 /// RSR（RotationSolverReborn）の今の動作モード・範囲攻撃の設定・真偽の設定を、RSR の内部から読む。
-/// RSR の IPC には今のモードを読む口が無い（AutorotationActive は「動作中か」だけ）。モードは RotationSolver.Basic.DataCenter の6つの旗で決まる。
+/// RSR の IPC には今のモードを読む口が無い（AutorotationActive は「動作中か」だけ）。モードは DataCenter の6つの旗で決まる。
 /// 読むだけで、書き換えはしない（切り替えは IPC で行う）。読めなければ null（呼び出し側は「分からない」として扱う）。
 /// </summary>
 public static class RsrStateReader
@@ -36,14 +33,14 @@ public static class RsrStateReader
     {
         try
         {
-            var dc = BasicType("RotationSolver.Basic.DataCenter");
+            var dc = DataCenterType();
             if (dc == null)
                 return null;
 
             bool Flag(string name)
                 => dc.GetProperty(name, BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is bool b
                     ? b
-                    : throw new MissingMemberException("RotationSolver.Basic.DataCenter", name);
+                    : throw new MissingMemberException(dc.FullName, name);
 
             LastError = null;
             return ModeFromFlags(Flag("State"), Flag("IsManual"), Flag("IsTargetOnly"), Flag("IsAutoDuty"), Flag("IsHenched"), Flag("IsPvPStateEnabled"));
@@ -106,7 +103,7 @@ public static class RsrStateReader
     {
         try
         {
-            return BasicType("RotationSolver.Basic.DataCenter")?
+            return DataCenterType()?
                 .GetProperty("TargetFreelyOverride", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as bool?;
         }
         catch
@@ -153,45 +150,33 @@ public static class RsrStateReader
         _ => $"不明({mode})",
     };
 
-    // RSR 本体と型の使い回し（0.25 秒ごとに5項目を読むので、毎回プラグイン一覧をたどらない）。5秒たつか、RSR が読み込み直されたら取り直す
-    private static object? cachedPlugin;
-    private static DateTime cachedAt = DateTime.MinValue;
-    private static readonly Dictionary<string, Type?> TypeCache = [];
+    private static readonly PluginTypeResolver Types = new();
+    internal static readonly string[] DataCenterNames = ["RotationSolver.Engine.State.DataCenter", "RotationSolver.Basic.DataCenter"];
+    internal static readonly string[] ServiceNames = ["RotationSolver.Engine.Service", "RotationSolver.Basic.Service"];
 
-    private static Type? BasicType(string name)
+    private static Type? DataCenterType()
+        => RsrType(DataCenterNames);
+
+    private static Type? RsrType(params string[] names)
     {
-        if (cachedPlugin == null || DateTime.UtcNow - cachedAt > TimeSpan.FromSeconds(5))
-        {
-            var fresh = FindPluginInstance(InternalName);
-            if (!ReferenceEquals(fresh, cachedPlugin))
-                TypeCache.Clear();
-            cachedPlugin = fresh;
-            cachedAt = DateTime.UtcNow;
-        }
-
-        var plugin = cachedPlugin;
+        var plugin = FindPluginInstance(InternalName);
+        var type = Types.Resolve(plugin, names);
         if (plugin == null)
         {
             LastError = "RSR が読み込まれていません";
             return null;
         }
 
-        if (TypeCache.TryGetValue(name, out var cached))
-            return cached;
-
-        // DataCenter は RotationSolver.Basic.dll にある。RSR が読み込んだものを使う（自分の文脈で解決すると別物になる）
-        var alc = AssemblyLoadContext.GetLoadContext(plugin.GetType().Assembly);
-        var basic = alc?.Assemblies.FirstOrDefault(a => a.GetName().Name == "RotationSolver.Basic");
-        var t = basic?.GetType(name, throwOnError: false);
-        if (t == null)
-            LastError = $"RSR の内部（{name}）が見つかりません（RSR の版が変わった可能性）";
+        if (type == null)
+            Note($"RSR の内部（{string.Join(" / ", names)}）が見つかりません（RSR の版が変わった可能性）");
         else
-            TypeCache[name] = t;
-        return t;
+            LastError = null;
+        return type;
     }
 
     private static object? Config()
-        => BasicType("RotationSolver.Basic.Service")?.GetProperty("Config", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
+        => RsrType(ServiceNames)?
+            .GetProperty("Config", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
 
     /// <summary>読み込まれているプラグインの本体（見つからなければ null）。</summary>
     internal static object? FindPluginInstance(string internalName)
